@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "PulseFit",
+    "slug": "c7-mobile",
+    "scheme": "pulsefit",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#050605",
+    "ios": { "supportsTablet": false, "bundleIdentifier": "com.c7.pulsefit" },
+    "android": { "package": "com.c7.pulsefit" },
+    "web": { "bundler": "metro", "output": "single" },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      ["expo-splash-screen", { "backgroundColor": "#050605", "image": "./assets/images/login-illustration.png", "imageWidth": 160 }]
+    ],
+    "experiments": { "typedRoutes": false }
+  }
+}
