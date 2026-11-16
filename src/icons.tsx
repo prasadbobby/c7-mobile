@@ -35,8 +35,8 @@ export const ProteinIcon = ({ size = 28 }: P) => (
 export const CarbsIcon = ({ size = 28 }: P) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M5 20 18 7" stroke={colors.carbs} strokeWidth={2} strokeLinecap="round" />
-    {[0, 1, 2].map((i) => (
-      <G key={i} fill={colors.carbs}>
+    {[0, 1, 2].map((i, keyIdx) => (
+      <G key={`${i}-${keyIdx}`} fill={colors.carbs}>
         <Ellipse cx={9 + i * 3} cy={11 - i * 3} rx={1.6} ry={3} transform={`rotate(45 ${9 + i * 3} ${11 - i * 3})`} />
         <Ellipse cx={12 + i * 3} cy={14 - i * 3} rx={1.6} ry={3} transform={`rotate(45 ${12 + i * 3} ${14 - i * 3})`} opacity={0.7} />
       </G>

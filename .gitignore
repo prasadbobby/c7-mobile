@@ -5,3 +5,10 @@ web-build/
 ios/
 android/
 *.log
+
+.env
+dist-e2e/
+e2e-report/
+test-results/
+_to_delete/
+.env*.local

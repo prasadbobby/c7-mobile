@@ -97,3 +97,24 @@ cd android && ./gradlew assembleRelease
 
 The release APK is signed with the debug key so it installs directly on a phone
 (enable “Install unknown apps”). Create your own keystore before publishing to the Play Store.
+
+## Live data (c7-backend + Clerk)
+
+Every screen now reads and writes real data through **c7-backend** (`../c7-backend`). Coaches configure everything in FitForge (staging admin): assigned workouts, rest timers, step goals, challenges and participants, recipes and nutrition goals, memberships and payments.
+
+```bash
+npm install                      # new deps: @clerk/expo, @tanstack/react-query, expo-image-picker, expo-secure-store…
+cp ../deploy/env/mobile.env .env # EXPO_PUBLIC_API_URL + Clerk publishable key (public values)
+npx expo start
+```
+
+Sign-in: Clerk email one-time code or Google, invite-only (accounts are created from FitForge invitations). First sign-in runs the 6-step setup (name, goal, level, age, weight, height).
+
+### End-to-end tests (Playwright, every feature)
+
+Runs the web build against c7-backend in `AUTH_MODE=test` on a throwaway local Postgres database (`c7test`, configured in `../c7-backend/.env.test`). Sign-in code in test mode is `424242`.
+
+```bash
+EXPO_PUBLIC_API_URL=http://localhost:4100 EXPO_PUBLIC_AUTH_MODE=test npx expo export -p web --output-dir dist-e2e
+npx playwright test               # 30 tests; report in e2e-report/
+```

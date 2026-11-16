@@ -1,12 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { Flame, Share2, Timer, Trophy, Zap } from 'lucide-react-native';
-import { useEffect, useMemo, useRef } from 'react';
+import { Dumbbell, Layers, Share2, Timer, Trophy } from 'lucide-react-native';
+import { useEffect, useMemo } from 'react';
 import { Share, View } from 'react-native';
 import Animated, { makeMutable, useAnimatedStyle, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { workouts } from '@/data';
+import { useStreaks } from '@/api/hooks';
 import { ease, gsap, svTo, useCountUp } from '@/motion';
-import { useApp } from '@/store';
 import { colors, font, radius, shadow } from '@/theme';
 import { haptic, HeroGlow, LimeGradient, PrimaryButton, SecondaryButton, Txt } from '@/ui';
 
@@ -15,18 +14,23 @@ const palette = [colors.primary, colors.primaryGlow, colors.cream, colors.carbs,
 
 /** Workout summary with a GSAP-orchestrated celebration: trophy pop → confetti burst → stat count-ups. */
 export default function Complete() {
-  const { id, secs } = useLocalSearchParams<{ id: string; secs?: string }>();
-  const w = workouts.find((x) => x.id === id) ?? workouts[0]!;
+  const p = useLocalSearchParams<{ name?: string; secs?: string; sets?: string; volume?: string; pbs?: string; log?: string }>();
   const insets = useSafeAreaInsets();
-  const logged = useRef(false);
-  const minutes = Math.max(1, Math.round(Number(secs ?? w.minutes * 60) / 60));
-  const kcal = Math.round((w.kcal / w.minutes) * minutes);
+  const streaks = useStreaks();
+  const minutes = Math.max(1, Math.round(Number(p.secs ?? 0) / 60));
+  const setCount = Number(p.sets ?? 0);
+  const volume = Number(p.volume ?? 0);
+  const pbs = useMemo<{ name: string; label: string }[]>(() => {
+    try {
+      return JSON.parse(p.pbs ?? '[]');
+    } catch {
+      return [];
+    }
+  }, [p.pbs]);
   useEffect(() => {
-    if (logged.current) return;
-    logged.current = true;
-    useApp.getState().logWorkout(w.id, minutes, kcal);
     haptic('success');
-  }, [w.id, minutes, kcal]);
+  }, []);
+  const streak = streaks.data?.activeStreak ?? 0;
 
   const trophy = useSharedValue(0);
   const text = useSharedValue(0);
@@ -46,8 +50,8 @@ export default function Complete() {
   const textA = useAnimatedStyle(() => ({ opacity: text.value, transform: [{ translateY: (1 - text.value) * 30 }] }));
 
   const m = useCountUp(minutes, { delay: 0.6 });
-  const k = useCountUp(kcal, { delay: 0.7 });
-  const xp = useCountUp(minutes * 10 + 50, { delay: 0.8 });
+  const k = useCountUp(setCount, { delay: 0.7 });
+  const xp = useCountUp(volume, { delay: 0.8 });
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface, paddingTop: insets.top, paddingBottom: insets.bottom + 20 }}>
@@ -69,13 +73,13 @@ export default function Complete() {
           Workout complete!
         </Txt>
         <Txt color={colors.textMuted} style={{ textAlign: 'center', marginTop: 8 }}>
-          {w.title} · You’re on a 4 day streak 🔥
+          {p.name ?? 'Workout'}{streak > 1 ? ` · ${streak} day streak 🔥` : ''}
         </Txt>
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 28 }}>
           {[
             { icon: Timer, v: m, u: 'min' },
-            { icon: Flame, v: k, u: 'kcal' },
-            { icon: Zap, v: xp, u: 'XP' },
+            { icon: Layers, v: k, u: 'sets' },
+            { icon: Dumbbell, v: xp, u: 'kg volume' },
           ].map((x) => (
             <View key={x.u} style={{ flex: 1, backgroundColor: colors.card, borderRadius: radius.lg, padding: 16, alignItems: 'center', gap: 8 }}>
               <x.icon size={22} color={colors.primary} />
@@ -86,8 +90,21 @@ export default function Complete() {
             </View>
           ))}
         </View>
+        {pbs.length > 0 && (
+          <View style={{ marginTop: 16, backgroundColor: colors.card, borderRadius: radius.lg, padding: 16, gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Trophy size={18} color={colors.carbs} />
+              <Txt v="bodyLg">{pbs.length} new personal best{pbs.length > 1 ? 's' : ''}</Txt>
+            </View>
+            {pbs.map((b) => (
+              <Txt key={b.name} v="small" color={colors.textMuted}>
+                {b.name} — {b.label}
+              </Txt>
+            ))}
+          </View>
+        )}
         <PrimaryButton title="Done" style={{ marginTop: 28 }} onPress={() => router.replace('/home')} />
-        <SecondaryButton title="Share result" leading={<Share2 size={18} color={colors.textMuted} />} style={{ marginTop: 12 }} onPress={() => Share.share({ message: `Just crushed ${w.title} on PulseFit — ${minutes} min, ${kcal} kcal 💪` })} />
+        <SecondaryButton title="Share result" leading={<Share2 size={18} color={colors.textMuted} />} style={{ marginTop: 12 }} onPress={() => Share.share({ message: `Just finished ${p.name ?? 'a workout'} at C7 — ${minutes} min, ${setCount} sets${pbs.length ? `, ${pbs.length} new PB${pbs.length > 1 ? 's' : ''}` : ''} 💪` })} />
       </Animated.View>
     </View>
   );

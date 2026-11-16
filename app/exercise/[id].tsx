@@ -1,166 +1,205 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { Bookmark, Expand, Flame, Gauge, Pause, Pencil, Play, Plus, Timer, Volume2, VolumeX } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { useLocalSearchParams } from 'expo-router';
+import { Activity, Dumbbell, Gauge, Heart, Flag, Lightbulb, Trophy } from 'lucide-react-native';
+import { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProgressLine } from '@/charts';
-import { workouts } from '@/data';
+import { shortDate } from '@/api/dates';
+import { useExercise, useExerciseHistory, useSetExerciseGoal, useToggleFavourite } from '@/api/hooks';
+import { pretty, setLabel } from '@/api/meta';
+import { workoutArt } from '@/data';
 import { DumbbellGlyph } from '@/icons';
 import { Parallax, Reveal, ScrollReveal, useScrollY, useStagger } from '@/motion';
-import { useApp } from '@/store';
 import { colors, font } from '@/theme';
-import { BackButton, Card, FadeBottom, IconButton, Img, InfoPill, PrimaryButton, Txt } from '@/ui';
+import { BackButton, Card, ErrorState, FadeBottom, Field, IconButton, Img, InfoPill, PrimaryButton, Sheet, Skeleton, toast, Txt, HeroGlow } from '@/ui';
 
-const TOTAL = 340;
-const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-const HERO = 470;
+const HERO = 420;
 
 export default function Exercise() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const w = workouts.find((x) => x.id === id) ?? workouts[0]!;
   const insets = useSafeAreaInsets();
-  const st = useApp();
-  const saved = st.saved.includes(w.id);
+  const q = useExercise(id);
+  const hist = useExerciseHistory(id);
+  const fav = useToggleFavourite();
+  const goal = useSetExerciseGoal();
   const { y, onScroll } = useScrollY();
-  const [playing, setPlaying] = useState(false);
-  const [t, setT] = useState(0);
-  const [muted, setMuted] = useState(false);
   const [more, setMore] = useState(false);
-  const [points, setPoints] = useState([22, 48, 30, 41, 28, 42, 34]);
+  const [goalOpen, setGoalOpen] = useState(false);
+  const [goalValue, setGoalValue] = useState('');
   const r = useStagger(3, { delay: 0.2 });
+  const e = q.data;
 
-  useEffect(() => {
-    if (!playing) return;
-    const iv = setInterval(() => setT((v) => (v >= TOTAL ? (setPlaying(false), TOTAL) : v + 1)), 1000);
-    return () => clearInterval(iv);
-  }, [playing]);
+  if (q.error) return <View style={{ flex: 1, backgroundColor: colors.surface, paddingTop: insets.top + 60 }}><HeroGlow /><ErrorState error={q.error} onRetry={() => q.refetch()} /><View style={{ position: 'absolute', top: insets.top + 8, left: 20 }}><BackButton /></View></View>;
 
-  const pp = useSharedValue(1);
-  const ppA = useAnimatedStyle(() => ({ transform: [{ scale: pp.value }] }));
-  const toggle = () => {
-    pp.value = 0.8;
-    pp.value = withSpring(1, { damping: 8 });
-    setPlaying(!playing);
-  };
+  const sessions = (hist.data ?? []).filter((s) => s.bestWeight > 0).slice(0, 7).reverse();
+  const pts = sessions.map((s) => s.bestWeight);
+  const lo = pts.length ? Math.floor(Math.min(...pts) * 0.8) : 0;
+  const hi = pts.length ? Math.ceil(Math.max(...pts) * 1.15) : 10;
+  const tick = (k: number) => Math.round(lo + ((hi - lo) * k) / 4);
+  const instructions = e?.instructions ?? [];
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.surface }}>
+    <View style={{ flex: 1, backgroundColor: colors.surface }}><HeroGlow />
       <Animated.ScrollView onScroll={onScroll} scrollEventThrottle={16} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 110 }}>
-        {/* Video hero */}
         <View style={{ height: HERO, borderBottomLeftRadius: 40, borderBottomRightRadius: 40, overflow: 'hidden' }}>
           <Parallax y={y} height={HERO} style={StyleSheet.absoluteFill}>
-            <Img source={w.image} style={StyleSheet.absoluteFill} />
+            <Img source={e?.image} fallback={workoutArt(e?.category, id)} style={StyleSheet.absoluteFill} />
           </Parallax>
           <FadeBottom />
-          <Pressable onPress={toggle} accessibilityLabel={playing ? 'Pause' : 'Play'} style={{ position: 'absolute', left: '50%', top: '45%', marginLeft: -44, marginTop: -44 }}>
-            <Animated.View style={[{ width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(5,6,5,0.45)', alignItems: 'center', justifyContent: 'center' }, ppA]}>
-              {playing ? <Pause size={34} color={colors.text} fill={colors.text} /> : <Play size={34} color={colors.text} fill={colors.text} style={{ marginLeft: 4 }} />}
-            </Animated.View>
-          </Pressable>
-          <View style={{ position: 'absolute', left: 20, right: 20, bottom: 22 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-              <Pressable onPress={toggle} hitSlop={8}>
-                {playing ? <Pause size={22} color={colors.text} fill={colors.text} /> : <Play size={22} color={colors.text} fill={colors.text} />}
-              </Pressable>
-              <Txt style={{ flex: 1 }}>
-                {fmt(t)} - {fmt(TOTAL)}
-              </Txt>
-              <Pressable onPress={() => setMuted(!muted)} hitSlop={8} accessibilityLabel="Mute">
-                {muted ? <VolumeX size={24} color={colors.text} /> : <Volume2 size={24} color={colors.text} />}
-              </Pressable>
-              <Pressable onPress={() => router.push(`/session/${w.id}`)} hitSlop={8} accessibilityLabel="Fullscreen">
-                <Expand size={22} color={colors.text} />
-              </Pressable>
+          {!!e && (
+            <View style={{ position: 'absolute', left: 20, right: 20, bottom: 22, flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              {[...e.primaryMuscles, ...e.secondaryMuscles.slice(0, 2)].map((m, k) => (
+                <View key={`${m}-${k}`} style={{ backgroundColor: k < e.primaryMuscles.length ? colors.primary : 'rgba(5,6,5,0.6)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 }}>
+                  <Txt v="caption" color={k < e.primaryMuscles.length ? colors.onPrimary : colors.text}>
+                    {pretty(m).toUpperCase()}
+                  </Txt>
+                </View>
+              ))}
             </View>
-            <Seek value={t / TOTAL} onSeek={(f) => setT(Math.round(f * TOTAL))} />
-          </View>
+          )}
         </View>
 
         <View style={{ position: 'absolute', top: insets.top + 8, left: 20, right: 20, flexDirection: 'row', justifyContent: 'space-between' }}>
           <BackButton />
-          <IconButton icon={<Bookmark size={20} color={saved ? colors.primary : colors.text} fill={saved ? colors.primary : 'transparent'} />} label="Save workout" onPress={() => st.toggle('saved', w.id)} />
+          <IconButton
+            icon={<Heart size={20} color={e?.isFavourite ? colors.danger : colors.text} fill={e?.isFavourite ? colors.danger : 'transparent'} />}
+            label={e?.isFavourite ? 'Remove from favourites' : 'Add to favourites'}
+            onPress={() => fav.mutate(id, { onSuccess: (x) => toast.ok(x.isFavourite ? 'Added to favourites' : 'Removed from favourites'), onError: toast.error })}
+          />
         </View>
 
-        <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
-          <Reveal p={r[0]!} style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-            <View style={{ flex: 1 }}>
-              <Txt v="h2">{w.title}</Txt>
+        {!e ? (
+          <View style={{ padding: 20, gap: 12 }}>
+            <Skeleton height={40} />
+            <Skeleton height={120} />
+          </View>
+        ) : (
+          <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
+            <Reveal p={r[0]!}>
+              <Txt v="h2">{e.name}</Txt>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
                 <DumbbellGlyph size={22} />
                 <Txt v="bodyLg" color={colors.textMuted}>
-                  {w.subtitle}
+                  {pretty(e.equipment ?? 'body only')}
                 </Txt>
               </View>
-            </View>
-            <InfoPill icon={Timer} label={`${w.minutes} min`} />
-          </Reveal>
-          <Reveal p={r[1]!}>
-            <Txt color={colors.textMuted} numberOfLines={more ? undefined : 3} style={{ marginTop: 20, lineHeight: 26 }}>
-              {w.description}
-            </Txt>
-            <Txt v="small" color={colors.primary} onPress={() => setMore(!more)} style={{ marginTop: 6 }}>
-              {more ? 'Show less' : 'Read more'}
-            </Txt>
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
-              <InfoPill icon={Flame} label={`${w.kcal} kcal`} style={{ flex: 1 }} />
-              <InfoPill icon={Gauge} label={w.level} style={{ flex: 1.3 }} />
-            </View>
-          </Reveal>
-
-          <Reveal p={r[2]!} style={{ marginTop: 28 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Txt v="h3">My Progress</Txt>
-              <View style={{ flexDirection: 'row', gap: 20 }}>
-                <Pressable accessibilityLabel="Edit last entry" onPress={() => setPoints(points.map((p, i) => (i === points.length - 1 ? Math.min(52, p + 2.5) : p)))}>
-                  <Pencil size={22} color={colors.text} strokeWidth={1.6} />
-                </Pressable>
-                <Pressable accessibilityLabel="Add entry" onPress={() => setPoints([...points.slice(1), Math.round(20 + Math.random() * 30)])}>
-                  <Plus size={24} color={colors.text} strokeWidth={1.6} />
-                </Pressable>
+            </Reveal>
+            <Reveal p={r[1]!}>
+              {!!e.description && (
+                <Txt color={colors.textMuted} style={{ marginTop: 18, lineHeight: 26 }}>
+                  {e.description}
+                </Txt>
+              )}
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+                <InfoPill icon={Gauge} label={pretty(e.level)} />
+                <InfoPill icon={Dumbbell} label={pretty(e.category)} />
+                {!!e.force && <InfoPill icon={Activity} label={pretty(e.force)} />}
+                {!!e.mechanic && <InfoPill label={pretty(e.mechanic)} />}
               </View>
-            </View>
-            <Txt style={{ fontFamily: font.light, fontSize: 36, lineHeight: 44, color: colors.primary, marginTop: 6, marginBottom: 28 }}>{points[points.length - 1]! + 5.5}kg</Txt>
-            <ProgressLine points={points} labels={['Mon', 'Wed', 'Thr', 'Sun']} />
-          </Reveal>
+            </Reveal>
 
-          <ScrollReveal y={y} offset={HERO} style={{ marginTop: 28 }}>
-            <Txt v="h3" style={{ marginBottom: 12 }}>
-              Session plan
-            </Txt>
-            {w.steps.map((s, k) => (
-              <Card key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 10, paddingVertical: 14 }}>
-                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: s.name === 'Rest' ? colors.secondary : 'rgba(198,242,27,0.12)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Txt v="small" color={s.name === 'Rest' ? colors.textMuted : colors.primary}>
-                    {k + 1}
+            <Reveal p={r[2]!} style={{ marginTop: 28 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Txt v="h3">My Progress</Txt>
+                {!!e.goal && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Flag size={16} color={colors.primary} />
+                    <Txt v="small" color={colors.textMuted}>
+                      Goal {e.goal.goalValue} kg
+                    </Txt>
+                  </View>
+                )}
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 20 }}>
+                <Trophy size={20} color={colors.carbs} />
+                <Txt style={{ fontFamily: font.light, fontSize: 32, lineHeight: 40, color: colors.primary }}>{e.pb ? setLabel(e.pb) : 'No PB yet'}</Txt>
+              </View>
+              {pts.length >= 2 ? (
+                <ProgressLine points={pts} labels={sessions.map((s) => new Date(s.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))} min={lo} max={hi} ticks={[tick(4), tick(3), tick(2), tick(1)]} />
+              ) : (
+                <Txt color={colors.textMuted}>Log this exercise in two or more workouts to see your strength trend.</Txt>
+              )}
+            </Reveal>
+
+            {instructions.length > 0 && (
+              <ScrollReveal y={y} offset={HERO} style={{ marginTop: 28 }}>
+                <Txt v="h3" style={{ marginBottom: 12 }}>
+                  How to do it
+                </Txt>
+                {(more ? instructions : instructions.slice(0, 4)).map((s, k) => (
+                  <Card key={k} style={{ flexDirection: 'row', gap: 14, marginBottom: 10, paddingVertical: 14 }}>
+                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(198,242,27,0.12)', alignItems: 'center', justifyContent: 'center' }}>
+                      <Txt v="small" color={colors.primary}>
+                        {k + 1}
+                      </Txt>
+                    </View>
+                    <Txt style={{ flex: 1 }}>{s}</Txt>
+                  </Card>
+                ))}
+                {instructions.length > 4 && (
+                  <Txt v="small" color={colors.primary} onPress={() => setMore(!more)}>
+                    {more ? 'Show less' : `Show all ${instructions.length} steps`}
                   </Txt>
+                )}
+              </ScrollReveal>
+            )}
+
+            {e.tips.length > 0 && (
+              <Card style={{ marginTop: 18, gap: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Lightbulb size={18} color={colors.carbs} />
+                  <Txt v="bodyLg">Coach tips</Txt>
                 </View>
-                <Txt style={{ flex: 1 }}>{s.name}</Txt>
-                <Txt v="small" color={colors.textMuted}>
-                  {s.reps ?? `${s.seconds}s`}
-                </Txt>
+                {e.tips.map((t, keyIdx) => (
+                  <Txt key={`${t}-${keyIdx}`} v="small" color={colors.textMuted}>
+                    • {t}
+                  </Txt>
+                ))}
               </Card>
-            ))}
-          </ScrollReveal>
-        </View>
+            )}
+
+            {(hist.data?.length ?? 0) > 0 && (
+              <View style={{ marginTop: 28 }}>
+                <Txt v="h3" style={{ marginBottom: 12 }}>
+                  History
+                </Txt>
+                {hist.data!.slice(0, 10).map((s) => (
+                  <Card key={s.logId} style={{ marginBottom: 10, gap: 4 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Txt v="bodyLg">{shortDate(s.date)}</Txt>
+                      <Txt v="small" color={colors.textMuted}>
+                        {s.planName}
+                      </Txt>
+                    </View>
+                    <Txt v="small" color={colors.textMuted}>
+                      {s.sets.map(setLabel).join('  ·  ')}
+                    </Txt>
+                  </Card>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
       </Animated.ScrollView>
 
       <View style={{ position: 'absolute', left: 20, right: 20, bottom: insets.bottom + 16 }}>
-        <PrimaryButton title="Start Workout" icon={Play} onPress={() => router.push(`/session/${w.id}`)} />
+        <PrimaryButton title={e?.goal ? 'Update goal' : 'Set a goal'} icon={Flag} disabled={!e} onPress={() => (setGoalValue(e?.goal ? String(e.goal.goalValue) : ''), setGoalOpen(true))} />
       </View>
+
+      <Sheet open={goalOpen} onClose={() => setGoalOpen(false)} title="Target weight">
+        <Txt color={colors.textMuted} style={{ marginBottom: 14 }}>
+          {e?.pb ? `Your best is ${setLabel(e.pb)}.` : 'Set the weight you want to lift for this exercise.'}
+        </Txt>
+        <Field placeholder="Goal (kg)" keyboardType="decimal-pad" value={goalValue} onChangeText={(t) => setGoalValue(t.replace(/[^0-9.]/g, ''))} accessibilityLabel="Goal in kilograms" />
+        <PrimaryButton
+          title="Save goal"
+          style={{ marginTop: 16 }}
+          loading={goal.isPending}
+          disabled={!(Number(goalValue) > 0)}
+          onPress={() => goal.mutate({ exerciseId: id, goalValue: Number(goalValue) }, { onSuccess: () => (setGoalOpen(false), toast.ok('Goal saved')), onError: toast.error })}
+        />
+      </Sheet>
     </View>
   );
 }
-
-function Seek({ value, onSeek }: { value: number; onSeek: (f: number) => void }) {
-  const [w, setW] = useState(1);
-  return (
-    <Pressable onLayout={(e) => setW(e.nativeEvent.layout.width)} onPress={(e) => onSeek(Math.min(1, Math.max(0, e.nativeEvent.locationX / w)))} style={{ height: 24, justifyContent: 'center', marginTop: 12 }} accessibilityLabel="Seek">
-      <View style={{ height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)' }}>
-        <View style={{ width: `${value * 100}%`, height: 4, borderRadius: 2, backgroundColor: colors.text }} />
-      </View>
-      <View style={{ position: 'absolute', left: `${value * 100}%`, marginLeft: -8, width: 16, height: 16, borderRadius: 8, backgroundColor: colors.text, borderWidth: 3, borderColor: colors.surface }} />
-    </Pressable>
-  );
-}
-

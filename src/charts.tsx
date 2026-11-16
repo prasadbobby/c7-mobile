@@ -26,7 +26,7 @@ export function ProgressLine({ points, labels, min = 15, max = 55, height = 170,
   const [w, setW] = useState(0);
   const left = 46;
   const H = height - 30;
-  const xy = useMemo(() => points.map((p, i) => [left + 10 + (i * (w - left - 30)) / Math.max(1, points.length - 1), 10 + (H - 10) - ((p - min) / (max - min)) * (H - 10)] as const), [points, w, H, min, max]);
+  const xy = useMemo(() => points.map((p, i) => [left + 10 + (i * (w - left - 30)) / Math.max(1, points.length - 1), 10 + (H - 10) - ((p - min) / (max - min || 1)) * (H - 10)] as const), [points, w, H, min, max]);
   const d = smooth(xy);
   const len = useMemo(() => xy.reduce((a, [x, y], i) => (i ? a + Math.hypot(x - xy[i - 1]![0], y - xy[i - 1]![1]) : 0), 0) * 1.2 + 10, [xy]);
   const draw = useSharedValue(0);
@@ -55,10 +55,11 @@ export function ProgressLine({ points, labels, min = 15, max = 55, height = 170,
               <Stop offset="1" stopColor={colors.primaryGlow} stopOpacity={0.5} />
             </LinearGradient>
           </Defs>
-          {ticks.map((v) => {
-            const y = 10 + (H - 10) - ((v - min) / (max - min)) * (H - 10);
+          {[...new Set(ticks)].map((v, i) => {
+            // Ticks can round to the same value on a narrow range — de-duped above, keyed by position.
+            const y = 10 + (H - 10) - ((v - min) / (max - min || 1)) * (H - 10);
             return (
-              <SvgText key={v} x={0} y={y + 4} fill={colors.textMuted} fontSize={12} fontFamily={font.regular}>
+              <SvgText key={`t${i}`} x={0} y={y + 4} fill={colors.textMuted} fontSize={12} fontFamily={font.regular}>
                 {`${v}${unit}`}
               </SvgText>
             );
@@ -68,14 +69,14 @@ export function ProgressLine({ points, labels, min = 15, max = 55, height = 170,
           {labels.map((l, i) => {
             const idx = Math.round(((i + 0.5) * (xy.length - 1)) / labels.length);
             return (
-              <SvgText key={l} x={xy[idx]?.[0] ?? 0} y={height - 4} fill={colors.textMuted} fontSize={13} fontFamily={font.regular} textAnchor="middle">
+              <SvgText key={`l${i}`} x={xy[idx]?.[0] ?? 0} y={height - 4} fill={colors.textMuted} fontSize={13} fontFamily={font.regular} textAnchor="middle">
                 {l}
               </SvgText>
             );
           })}
         </Svg>
       )}
-      {w > 0 && marker && xy.map(([x, y], i) => (i % 2 === 1 ? <Marker key={i} x={x} y={y} p={pops[i]!} /> : null))}
+      {!!(w > 0 && marker) && xy.map(([x, y], i) => (i % 2 === 1 ? <Marker key={i} x={x} y={y} p={pops[i]!} /> : null))}
     </View>
   );
 }
@@ -91,7 +92,7 @@ function Marker({ x, y, p }: { x: number; y: number; p: ReturnType<typeof makeMu
 
 /** Rising bar chart (weekly steps / kcal). Bars stagger up with GSAP. */
 export function Bars({ values, labels, highlight, height = 160, goal }: { values: number[]; labels: string[]; highlight?: number; height?: number; goal?: number }) {
-  const max = Math.max(...values, goal ?? 0) * 1.1;
+  const max = Math.max(...values, goal ?? 0, 1) * 1.1;
   const ps = useMemo(() => values.map(() => makeMutable(0)), [values]);
   useEffect(() => {
     ps.forEach((p) => (p.value = 0));
@@ -102,7 +103,7 @@ export function Bars({ values, labels, highlight, height = 160, goal }: { values
   }, [ps]);
   return (
     <View style={{ height: height + 24 }}>
-      {goal && (
+      {!!goal && (
         <View style={{ position: 'absolute', left: 0, right: 0, top: height - (goal / max) * height, borderTopWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(198,242,27,0.45)' }}>
           <Txt v="caption" color={colors.primary} style={{ position: 'absolute', right: 0, top: -16 }}>
             Goal
@@ -116,7 +117,7 @@ export function Bars({ values, labels, highlight, height = 160, goal }: { values
       </View>
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
         {labels.map((l, i) => (
-          <Txt key={l} v="caption" color={i === highlight ? colors.primary : colors.textMuted} style={{ flex: 1, textAlign: 'center' }}>
+          <Txt key={i} v="caption" color={i === highlight ? colors.primary : colors.textMuted} style={{ flex: 1, textAlign: 'center' }}>
             {l}
           </Txt>
         ))}

@@ -10,6 +10,7 @@ import { router } from 'expo-router';
 import { BellRing, Check, ChevronLeft, EllipsisVertical, Eye, EyeOff, Flame, Timer, type LucideIcon } from 'lucide-react-native';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
+  Dimensions,
   Modal,
   Platform,
   Pressable,
@@ -24,36 +25,55 @@ import {
   type TextProps,
   type TextStyle,
   type ViewStyle,
+  useWindowDimensions,
 } from 'react-native';
-import Animated, {
+import Animated, { Easing,
   useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withSequence,
-  withSpring,
+  
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { ease, svTo, useHeaderFade } from './motion';
-import { useApp } from './store';
 import { colors, font, gradients, radius, shadow, type } from './theme';
 
 /* ----------------------------------------------------------------- basics -- */
 
 type Variant = keyof typeof type;
-export function Txt({ v = 'body', color = colors.text, style, ...p }: TextProps & { v?: Variant; color?: string }) {
-  return <Text {...p} style={[type[v] as TextStyle, { color }, style]} />;
+/**
+ * Responsive type: the design is drawn at 390pt wide. Small phones (320–375) scale text down a
+ * little and large phones up a little, so every screen keeps the same proportions and nothing wraps
+ * or clips differently. Clamped so text stays readable.
+ */
+const TYPE_SCALE = Math.min(1.08, Math.max(0.84, Dimensions.get('window').width / 390));
+export const rs = (n: number) => Math.round(n * TYPE_SCALE);
+function scaled(style: StyleProp<TextStyle>): TextStyle {
+  const f = StyleSheet.flatten(style) ?? {};
+  return { ...f, ...(f.fontSize ? { fontSize: rs(f.fontSize) } : null), ...(f.lineHeight ? { lineHeight: rs(f.lineHeight) } : null) };
 }
+export function Txt({ v = 'body', color = colors.text, style, ...p }: TextProps & { v?: Variant; color?: string }) {
+  return <Text maxFontSizeMultiplier={1.3} {...p} style={scaled([type[v] as TextStyle, { color }, style])} />;
+}
+
+/** Strings/numbers can't sit directly in a <View> (RN-web: "Unexpected text node"). Wrap them in Txt. */
+export const asNode = (x: ReactNode): ReactNode => (typeof x === 'string' || typeof x === 'number' ? (x === '' ? null : <Txt>{x}</Txt>) : x);
 
 export function Icon({ as: C, size = 22, color = colors.text, strokeWidth = 1.8 }: { as: LucideIcon; size?: number; color?: string; strokeWidth?: number }) {
   return <C size={size} color={color} strokeWidth={strokeWidth} />;
 }
 
+let hapticsOn = true;
+/** Synced from the member's saved preference (Settings → Haptics). */
+export const setHapticsEnabled = (v: boolean) => {
+  hapticsOn = v;
+};
 export function haptic(kind: 'light' | 'medium' | 'success' = 'light') {
-  if (Platform.OS === 'web' || !useApp.getState().settings.haptics) return;
+  if (Platform.OS === 'web' || !hapticsOn) return;
   try {
     if (kind === 'success') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     else Haptics.impactAsync(kind === 'medium' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
@@ -77,11 +97,11 @@ export function Press({
     <APressable
       {...p}
       onPressIn={(e) => {
-        s.value = withSpring(scaleTo, { damping: 15, stiffness: 400 });
+        s.value = withTiming(scaleTo, { duration: 90, easing: Easing.out(Easing.quad) });
         p.onPressIn?.(e);
       }}
       onPressOut={(e) => {
-        s.value = withSpring(1, { damping: 12, stiffness: 300 });
+        s.value = withTiming(1, { duration: 160, easing: Easing.out(Easing.quad) });
         p.onPressOut?.(e);
       }}
       onPress={(e) => {
@@ -95,25 +115,37 @@ export function Press({
   );
 }
 
-export function Img({ source, style, ...p }: Omit<ImageProps, 'source'> & { source: ImageSourcePropType }) {
-  return <Image source={source as ImageProps['source']} contentFit="cover" transition={250} style={style} {...p} />;
+export type Source = ImageSourcePropType | string | null | undefined;
+/** Remote URLs (FitForge uploads, data URLs) or bundled assets, with a bundled fallback. */
+export const src = (s: Source, fallback?: ImageSourcePropType): ImageProps['source'] =>
+  (typeof s === 'string' ? (s ? { uri: s } : fallback) : (s ?? fallback)) as ImageProps['source'];
+
+export function Img({ source, fallback, style, ...p }: Omit<ImageProps, 'source'> & { source: Source; fallback?: ImageSourcePropType }) {
+  return <Image source={src(source, fallback)} contentFit="cover" transition={250} style={[{ backgroundColor: colors.secondary }, style as object]} {...p} />;
 }
 
 /* ------------------------------------------------------------ backgrounds -- */
 
-/** The signature radial green glow at the top of every screen. */
-export function HeroGlow({ height = 520, intensity = 1 }: { height?: number; intensity?: number }) {
+/**
+ * The signature hero glow — a broad green wash from the top-left third that fades out by mid-screen,
+ * matched to the Lovable screens. Drawn in a stretched 100×100 viewBox with a userSpace circle so it
+ * becomes an ellipse sized to the screen identically on iOS, Android and web (web ignores rx/ry).
+ * `height` / `intensity` are kept for older call sites.
+ */
+export function HeroGlow(_: { height?: number; intensity?: number }) {
+  const { height } = useWindowDimensions();
   return (
-    <View pointerEvents="none" style={[StyleSheet.absoluteFill, { height }]}>
-      <Svg width="100%" height="100%">
+    <View pointerEvents="none" style={[StyleSheet.absoluteFill, { height: Math.max(height, 700) }]}>
+      <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
         <Defs>
-          <RadialGradient id="hero" cx="30%" cy="0%" rx="110%" ry="70%">
-            <Stop offset="0" stopColor={colors.heroTop} stopOpacity={0.95 * intensity} />
-            <Stop offset="0.45" stopColor={colors.heroMid} stopOpacity={0.9 * intensity} />
+          <RadialGradient id="hero" gradientUnits="userSpaceOnUse" cx="30" cy="0" fx="30" fy="0" r="82">
+            <Stop offset="0" stopColor="#21471D" stopOpacity={1} />
+            <Stop offset="0.35" stopColor="#142A13" stopOpacity={1} />
+            <Stop offset="0.7" stopColor="#070D07" stopOpacity={1} />
             <Stop offset="1" stopColor={colors.surface} stopOpacity={1} />
           </RadialGradient>
         </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#hero)" />
+        <Rect x="0" y="0" width="100" height="100" fill="url(#hero)" />
       </Svg>
     </View>
   );
@@ -139,7 +171,7 @@ export const TAB_BAR_SPACE = 130;
 export function Screen({ children, glow = true, style }: { children: ReactNode; glow?: boolean; style?: StyleProp<ViewStyle> }) {
   return (
     <View style={[{ flex: 1, backgroundColor: colors.surface }, style]}>
-      {glow && <HeroGlow />}
+      {!!glow && <HeroGlow />}
       {children}
     </View>
   );
@@ -157,7 +189,7 @@ export function IconButton({ icon, onPress, label, badge, style, size = 48, tint
   return (
     <Press accessibilityRole="button" accessibilityLabel={label} onPress={onPress} scaleTo={0.88} style={[{ width: size, height: size, borderRadius: size / 2, backgroundColor: tint, alignItems: 'center', justifyContent: 'center' }, style]}>
       {isComp ? <IconC size={size * 0.44} color={colors.text} strokeWidth={1.8} /> : (icon as ReactNode)}
-      {badge && <PulseDot style={{ position: 'absolute', top: size * 0.2, right: size * 0.22 }} />}
+      {!!badge && <PulseDot style={{ position: 'absolute', top: size * 0.2, right: size * 0.22 }} />}
     </Press>
   );
 }
@@ -165,7 +197,7 @@ export function IconButton({ icon, onPress, label, badge, style, size = 48, tint
 export function PulseDot({ style, color = colors.danger }: { style?: StyleProp<ViewStyle>; color?: string }) {
   const s = useSharedValue(1);
   useEffect(() => {
-    s.value = withRepeat(withSequence(withTiming(1.5, { duration: 700 }), withTiming(1, { duration: 700 })), -1);
+    s.value = 1; // static dot — no pulsing
   }, [s]);
   const halo = useAnimatedStyle(() => ({ transform: [{ scale: s.value }], opacity: 2 - s.value }));
   return (
@@ -176,10 +208,12 @@ export function PulseDot({ style, color = colors.danger }: { style?: StyleProp<V
   );
 }
 
-export function PrimaryButton({ title, onPress, style, icon, disabled }: { title: string; onPress?: () => void; style?: StyleProp<ViewStyle>; icon?: LucideIcon; disabled?: boolean }) {
+export function PrimaryButton({ title, onPress, style, icon, disabled, loading }: { title: string; onPress?: () => void; style?: StyleProp<ViewStyle>; icon?: LucideIcon; disabled?: boolean; loading?: boolean }) {
+  if (loading) title = 'Please wait…';
+  disabled = disabled || loading;
   return (
-    <Press disabled={disabled} onPress={onPress} hapticKind="medium" style={[{ height: 58, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, opacity: disabled ? 0.45 : 1 }, shadow.glow, style]}>
-      {icon && <Icon as={icon} color={colors.onPrimary} size={20} strokeWidth={2.2} />}
+    <Press disabled={disabled} accessibilityRole="button" accessibilityState={{ disabled: !!disabled }} onPress={onPress} hapticKind="medium" style={[{ height: 58, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, opacity: disabled ? 0.45 : 1 }, shadow.glow, style]}>
+      {!!icon && <Icon as={icon} color={colors.onPrimary} size={20} strokeWidth={2.2} />}
       <Txt v="bodyLg" color={colors.onPrimary} style={{ fontFamily: font.medium }}>
         {title}
       </Txt>
@@ -187,10 +221,10 @@ export function PrimaryButton({ title, onPress, style, icon, disabled }: { title
   );
 }
 
-export function SecondaryButton({ title, onPress, style, leading }: { title: string; onPress?: () => void; style?: StyleProp<ViewStyle>; leading?: ReactNode }) {
+export function SecondaryButton({ title, onPress, style, leading, disabled }: { title: string; onPress?: () => void; style?: StyleProp<ViewStyle>; leading?: ReactNode; disabled?: boolean }) {
   return (
-    <Press onPress={onPress} style={[{ height: 58, borderRadius: radius.pill, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10 }, style]}>
-      {leading}
+    <Press onPress={onPress} disabled={disabled} accessibilityRole="button" style={[{ opacity: disabled ? 0.5 : 1 }, { height: 58, borderRadius: radius.pill, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10 }, style]}>
+      {asNode(leading)}
       <Txt color={colors.textMuted}>{title}</Txt>
     </Press>
   );
@@ -222,19 +256,19 @@ export function BackButton({ onPress }: { onPress?: () => void }) {
  * Centered-title top bar (Search for Meal / Leaderboard). When `y` is passed it
  * gets a blurred backdrop that fades in on scroll.
  */
-export function TopBar({ title, right, y, onBack }: { title?: string; right?: ReactNode; y?: SharedValue<number>; onBack?: () => void }) {
+export function TopBar({ title, right, y, onBack, back = true }: { title?: string; right?: ReactNode; y?: SharedValue<number>; onBack?: () => void; back?: boolean }) {
   const top = useTopInset();
   const fade = useHeaderFade(y ?? ({ value: 0 } as SharedValue<number>), 30, 90);
   return (
     <View style={{ position: y ? 'absolute' : 'relative', top: 0, left: 0, right: 0, zIndex: 20, paddingTop: top, paddingHorizontal: 20, paddingBottom: 10 }}>
-      {y && (
+      {!!y && (
         <Animated.View style={[StyleSheet.absoluteFill, fade]}>
           <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
           <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(5,6,5,0.55)', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border }]} />
         </Animated.View>
       )}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <BackButton onPress={onBack} />
+        {back ? <BackButton onPress={onBack} /> : <View style={{ width: 48 }} />}
         {title ? <Txt v="h3">{title}</Txt> : <View />}
         {right ?? <IconButton icon={EllipsisVertical} label="More options" />}
       </View>
@@ -242,11 +276,21 @@ export function TopBar({ title, right, y, onBack }: { title?: string; right?: Re
   );
 }
 
-export function Avatar({ source, size = 56, ring = true, ringColor = colors.primaryGlow, badge }: { source: ImageSourcePropType; size?: number; ring?: boolean; ringColor?: string; badge?: ReactNode }) {
+export function Avatar({ source, name, size = 56, ring = true, ringColor = colors.primaryGlow, badge }: { source: Source; name?: string; size?: number; ring?: boolean; ringColor?: string; badge?: ReactNode }) {
+  const empty = !source || (typeof source === 'string' && !source);
+  const initials = (name ?? '').split(' ').map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
   return (
     <View>
-      <Img source={source} style={{ width: size, height: size, borderRadius: size / 2, borderWidth: ring ? 2 : 0, borderColor: ringColor }} />
-      {badge && <View style={{ position: 'absolute', right: -4, bottom: -4 }}>{badge}</View>}
+      {empty ? (
+        <View style={{ width: size, height: size, borderRadius: size / 2, borderWidth: ring ? 2 : 0, borderColor: ringColor, backgroundColor: colors.secondary, alignItems: 'center', justifyContent: 'center' }}>
+          <Txt style={{ fontFamily: font.semibold, fontSize: size * 0.36 }} color={colors.primary}>
+            {initials || '•'}
+          </Txt>
+        </View>
+      ) : (
+        <Img source={source} style={{ width: size, height: size, borderRadius: size / 2, borderWidth: ring ? 2 : 0, borderColor: ringColor }} />
+      )}
+      {!!badge && <View style={{ position: 'absolute', right: -4, bottom: -4 }}>{asNode(badge)}</View>}
     </View>
   );
 }
@@ -262,20 +306,20 @@ export function RankBadge({ n, light }: { n: number | string; light?: boolean })
 }
 
 /** "Hello Emma 👋 / Get ready" header with notification + streak buttons. */
-export function Greeting({ name, avatar }: { name: string; avatar: ImageSourcePropType }) {
+export function Greeting({ name, avatar, unread, subtitle = 'Get ready' }: { name: string; avatar: Source; unread?: boolean; subtitle?: string }) {
   const top = useTopInset(12);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: top }}>
       <Press onPress={() => router.push('/profile')} scaleTo={0.9}>
-        <Avatar source={avatar} size={56} ringColor="rgba(198,242,27,0.45)" />
+        <Avatar source={avatar} name={name} size={56} ringColor="rgba(198,242,27,0.45)" />
       </Press>
       <View style={{ flex: 1 }}>
         <Txt v="bodyLg">Hello {name} 👋</Txt>
         <Txt v="small" color={colors.textMuted}>
-          Get ready
+          {subtitle}
         </Txt>
       </View>
-      <IconButton icon={BellRing} label="Notifications" badge onPress={() => router.push('/notifications')} />
+      <IconButton icon={BellRing} label="Notifications" badge={unread} onPress={() => router.push('/notifications')} />
       <IconButton icon={Flame} label="Streak" onPress={() => router.push('/streak')} />
     </View>
   );
@@ -287,7 +331,7 @@ export function SectionHeader({ title, action, overline, style }: { title: strin
       <Txt v={overline ? 'overline' : 'h3'} color={overline ? colors.textMuted : colors.text}>
         {title}
       </Txt>
-      {action}
+      {asNode(action)}
     </View>
   );
 }
@@ -323,7 +367,7 @@ export function Segmented<T extends string>({ options, value, onChange }: { opti
       {w > 0 && <Animated.View style={[{ position: 'absolute', top: 4, bottom: 4, left: 4, width: seg - 8 + 4 / options.length, borderRadius: radius.pill, borderWidth: 2, borderColor: colors.primary, backgroundColor: 'rgba(198,242,27,0.06)' }, thumb]} />}
       {options.map((o) => (
         <Pressable key={o.id} onPress={() => (haptic(), onChange(o.id))} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 6 }}>
-          {o.icon && (
+          {!!o.icon && (
             <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border }}>
               <o.icon size={18} color={o.id === value ? colors.primary : colors.text} strokeWidth={1.8} />
             </View>
@@ -341,9 +385,9 @@ export function Checkbox({ checked, onChange, label }: { checked: boolean; onCha
   return (
     <Pressable onPress={() => (haptic(), onChange(!checked))} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
       <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: checked ? colors.primary : colors.textMuted, backgroundColor: checked ? colors.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-        {checked && <Check size={14} color={colors.onPrimary} strokeWidth={3} />}
+        {!!checked && <Check size={14} color={colors.onPrimary} strokeWidth={3} />}
       </View>
-      {label}
+      {asNode(label)}
     </Pressable>
   );
 }
@@ -351,7 +395,7 @@ export function Checkbox({ checked, onChange, label }: { checked: boolean; onCha
 export function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   const x = useSharedValue(value ? 1 : 0);
   useEffect(() => {
-    x.value = withSpring(value ? 1 : 0, { damping: 16, stiffness: 220 });
+    x.value = withTiming(value ? 1 : 0, { duration: 200, easing: Easing.out(Easing.cubic) });
   }, [value, x]);
   const knob = useAnimatedStyle(() => ({ transform: [{ translateX: x.value * 22 }] }));
   const track = useAnimatedStyle(() => ({ backgroundColor: x.value > 0.5 ? colors.primary : colors.muted }));
@@ -380,7 +424,7 @@ export function Field({ secure, style, ...p }: TextInputProps & { secure?: boole
         {...p}
         style={[type.bodyLg, { flex: 1, color: colors.text }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as unknown as TextStyle) : null]}
       />
-      {secure && (
+      {!!secure && (
         <Pressable onPress={() => setHidden(!hidden)} hitSlop={10} accessibilityLabel={hidden ? 'Show password' : 'Hide password'}>
           {hidden ? <Eye size={20} color={colors.textMuted} /> : <EyeOff size={20} color={colors.textMuted} />}
         </Pressable>
@@ -406,8 +450,8 @@ export function Card({ children, style, onPress }: { children: ReactNode; style?
 export function StatTile({ icon, label, value, unit, sub, width = 140, style, compact }: { icon: ReactNode; label: string; value: string | number; unit?: string; sub?: string; width?: number; style?: StyleProp<ViewStyle>; compact?: boolean }) {
   return (
     <View style={[{ width, backgroundColor: colors.card, borderRadius: radius.lg, padding: 16 }, style]}>
-      <View style={{ height: 30, marginBottom: compact ? 12 : 18 }}>{icon}</View>
-      <Txt v="small" color={colors.textMuted}>
+      <View style={{ height: 30, marginBottom: compact ? 12 : 18 }}>{asNode(icon)}</View>
+      <Txt v="small" color={colors.textMuted} numberOfLines={1}>
         {label}
       </Txt>
       <Txt numberOfLines={1} adjustsFontSizeToFit style={{ marginTop: 6, fontFamily: font.light, fontSize: compact ? 19 : 26, lineHeight: compact ? 24 : 32 }}>
@@ -416,7 +460,7 @@ export function StatTile({ icon, label, value, unit, sub, width = 140, style, co
           {unit}
         </Txt>
       </Txt>
-      {sub && (
+      {!!sub && (
         <Txt v="caption" color={colors.textMuted}>
           {sub}
         </Txt>
@@ -435,7 +479,7 @@ export function ActivityRow({ icon, tone, title, time, value, unit, onPress, lig
     <Card onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 16, borderRadius: radius.xl, backgroundColor: light ? colors.secondary : colors.card }}>
       <View style={{ padding: 4, borderRadius: 40, borderWidth: 2, borderColor: 'rgba(198,242,27,0.4)', borderStyle: 'dashed' }}>
         {fill ? (
-          <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: fill, alignItems: 'center', justifyContent: 'center' }}>{glyph}</View>
+          <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: fill, alignItems: 'center', justifyContent: 'center' }}>{asNode(glyph)}</View>
         ) : (
           <LimeGradient horizontal={false} style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' }}>
             {glyph}
@@ -459,12 +503,12 @@ export function ActivityRow({ icon, tone, title, time, value, unit, onPress, lig
 }
 
 /** Image card for workouts (title + duration over a bottom fade). */
-export function MediaCard({ image, title, minutes, onPress, width = 160, height = 184, badge }: { image: ImageSourcePropType; title: string; minutes?: number; onPress?: () => void; width?: number | `${number}%`; height?: number; badge?: string }) {
+export function MediaCard({ image, fallback, title, minutes, onPress, width = 160, height = 184, badge }: { image: Source; fallback?: ImageSourcePropType; title: string; minutes?: number; onPress?: () => void; width?: number | `${number}%`; height?: number; badge?: string }) {
   return (
     <Press onPress={onPress} scaleTo={0.95} style={{ width, height, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: colors.card }}>
-      <Img source={image} style={StyleSheet.absoluteFill} />
+      <Img source={image} fallback={fallback} style={StyleSheet.absoluteFill} />
       <FadeBottom />
-      {badge && (
+      {!!badge && (
         <View style={{ position: 'absolute', top: 10, left: 10, backgroundColor: 'rgba(5,6,5,0.6)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill }}>
           <Txt v="caption" color={colors.primary}>
             {badge}
@@ -491,7 +535,7 @@ export function MediaCard({ image, title, minutes, onPress, width = 160, height 
 export function InfoPill({ icon, label, style }: { icon?: LucideIcon; label: string; style?: StyleProp<ViewStyle> }) {
   return (
     <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.card, borderRadius: radius.pill, paddingHorizontal: 16, paddingVertical: 12 }, style]}>
-      {icon && <Icon as={icon} size={18} />}
+      {!!icon && <Icon as={icon} size={18} />}
       <Txt v="body">{label}</Txt>
     </View>
   );
@@ -551,7 +595,7 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
     if (open) {
       setMounted(true);
       y.value = 600;
-      y.value = withSpring(0, { damping: 20, stiffness: 180 });
+      y.value = withTiming(0, { duration: 280, easing: Easing.out(Easing.cubic) });
     } else if (mounted) {
       const t = svTo(y, 600, { duration: 0.3, ease: 'power2.in', onComplete: () => setMounted(false) });
       return () => {
@@ -570,7 +614,7 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
       </Animated.View>
       <Animated.View style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: colors.card, borderTopLeftRadius: 32, borderTopRightRadius: 32, paddingHorizontal: 20, paddingTop: 10, paddingBottom: insets.bottom + 20, borderTopWidth: 1, borderColor: colors.border }, panel]}>
         <View style={{ alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: colors.muted, marginBottom: 16 }} />
-        {title && (
+        {!!title && (
           <Txt v="h3" style={{ marginBottom: 16 }}>
             {title}
           </Txt>
@@ -585,7 +629,7 @@ export function Divider({ label }: { label?: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 40 }}>
       <LinearGradient colors={['transparent', colors.muted]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ flex: 1, height: 1 }} />
-      {label && <Txt color={colors.textMuted}>{label}</Txt>}
+      {!!label && <Txt color={colors.textMuted}>{label}</Txt>}
       <LinearGradient colors={[colors.muted, 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ flex: 1, height: 1 }} />
     </View>
   );
@@ -601,7 +645,7 @@ export function EmptyState({ icon, title, body, action }: { icon: LucideIcon; ti
       <Txt color={colors.textMuted} style={{ textAlign: 'center' }}>
         {body}
       </Txt>
-      {action}
+      {asNode(action)}
     </View>
   );
 }
@@ -611,3 +655,67 @@ export const s = StyleSheet.create({
   between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   px: { paddingHorizontal: 20 },
 });
+
+/* ------------------------------------------------------- data states -- */
+
+/** Shimmering placeholder block used while server data loads. */
+export function Skeleton({ height = 80, width = '100%', radius: r = radius.lg, style }: { height?: number; width?: number | `${number}%`; radius?: number; style?: StyleProp<ViewStyle> }) {
+  const o = useSharedValue(0.45);
+  useEffect(() => {
+    o.value = withRepeat(withSequence(withTiming(0.9, { duration: 700 }), withTiming(0.45, { duration: 700 })), -1);
+  }, [o]);
+  const a = useAnimatedStyle(() => ({ opacity: o.value }));
+  return <Animated.View accessibilityLabel="Loading" style={[{ height, width, borderRadius: r, backgroundColor: colors.card }, a, style]} />;
+}
+
+/** Error card with retry — every screen shows this instead of silently failing. */
+export function ErrorState({ error, onRetry, style }: { error: unknown; onRetry?: () => void; style?: StyleProp<ViewStyle> }) {
+  const msg = error instanceof Error ? error.message : 'Something went wrong';
+  return (
+    <View style={[{ margin: 20, padding: 20, borderRadius: radius.xl, backgroundColor: colors.card, borderWidth: 1, borderColor: 'rgba(233,67,45,0.35)', gap: 12 }, style]}>
+      <Txt v="bodyLg">Couldn’t load this</Txt>
+      <Txt v="small" color={colors.textMuted}>
+        {msg}
+      </Txt>
+      {!!onRetry && <PillButton title="TRY AGAIN" onPress={onRetry} style={{ alignSelf: 'flex-start' }} />}
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------- toast -- */
+
+type ToastT = { id: number; text: string; tone: 'ok' | 'error' };
+let pushToast: (t: ToastT) => void = () => {};
+let toastId = 0;
+export const toast = {
+  ok: (text: string) => pushToast({ id: ++toastId, text, tone: 'ok' }),
+  error: (e: unknown) => pushToast({ id: ++toastId, text: e instanceof Error ? e.message : String(e), tone: 'error' }),
+};
+
+/** Mounted once in the root layout. */
+export function Toaster() {
+  const insets = useSafeAreaInsets();
+  const [items, setItems] = useState<ToastT[]>([]);
+  useEffect(() => {
+    pushToast = (t) => {
+      setItems((l) => [...l.slice(-2), t]);
+      if (t.tone === 'ok') haptic('success');
+      setTimeout(() => setItems((l) => l.filter((x) => x.id !== t.id)), t.tone === 'error' ? 4500 : 2600);
+    };
+    return () => {
+      pushToast = () => {};
+    };
+  }, []);
+  if (!items.length) return null;
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', top: insets.top + 8, left: 16, right: 16, gap: 8, zIndex: 1000 }}>
+      {items.map((t) => (
+        <View key={t.id} accessibilityRole="alert" style={[{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: radius.lg, backgroundColor: t.tone === 'ok' ? colors.primary : colors.danger }, shadow.card]}>
+          <Txt v="body" color={t.tone === 'ok' ? colors.onPrimary : '#fff'} style={{ flex: 1, fontFamily: font.medium }}>
+            {t.text}
+          </Txt>
+        </View>
+      ))}
+    </View>
+  );
+}

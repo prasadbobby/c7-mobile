@@ -1,26 +1,37 @@
-import { ArrowDownUp, ChefHat, Crown, Dumbbell, Medal } from 'lucide-react-native';
+import { ArrowDownUp, CalendarCheck, Crown, Medal, Trophy } from 'lucide-react-native';
+import { useLocalSearchParams } from 'expo-router';
+import { ScrollView } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Animated, { Easing, LinearTransition, makeMutable, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withTiming, type SharedValue } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Text as SvgText } from 'react-native-svg';
-import { avatars, leaderboard } from '@/data';
+import { useChallenges, useLeaderboard, useMe } from '@/api/hooks';
+import { fullName } from '@/api/meta';
+import type { LeaderEntry } from '@/api/types';
+import { ArtEmpty } from '@/badges';
 import { ease, gsap, Reveal, svStagger, useScrollY, useStagger } from '@/motion';
-import { useApp } from '@/store';
 import { colors, font, radius, shadow } from '@/theme';
-import { Avatar, HeroGlow, LimeGradient, RankBadge, SectionHeader, Segmented, TopBar, Txt, useTopInset } from '@/ui';
+import { Avatar, Chip, ErrorState, HeroGlow, LimeGradient, RankBadge, SectionHeader, Segmented, Skeleton, TopBar, Txt, useTopInset } from '@/ui';
 
-type Tab = 'workout' | 'cooking';
+type Tab = 'overall' | 'weekly';
 
 export default function Leaderboard() {
-  const st = useApp();
+  const params = useLocalSearchParams<{ id?: string }>();
+  const challenges = useChallenges();
+  const id = params.id ?? challenges.data?.find((c) => c.access === 'enabled')?.id;
+  const title = challenges.data?.find((c) => c.id === id)?.title;
   const { width } = useWindowDimensions();
   const top = useTopInset(64);
   const { y, onScroll } = useScrollY();
-  const [tab, setTab] = useState<Tab>('workout');
+  const [tab, setTab] = useState<Tab>('overall');
+  const [week, setWeek] = useState<number | undefined>();
   const [asc, setAsc] = useState(false);
-  const data = leaderboard[tab];
+  const me = useMe();
+  const q = useLeaderboard(id, week);
+  const data: LeaderEntry[] = (tab === 'overall' ? q.data?.overall : q.data?.weekly) ?? [];
   const rows = asc ? [...data].reverse() : data;
-  const unit = tab === 'workout' ? '/steps' : '/pts';
+  const mine = tab === 'overall' ? q.data?.me.overall : q.data?.me.weekly;
+  const unit = 'pts';
 
   // GSAP podium sequence: blocks rise (elastic), then avatars pop in 2 → 1 → 3 order.
   const blocks = useMemo(() => [0, 1, 2].map(() => makeMutable(0)), []);
@@ -33,33 +44,40 @@ export default function Leaderboard() {
     return () => {
       tl.kill();
     };
-  }, [tab, blocks, heads]);
+  }, [tab, week, q.data, blocks, heads]);
 
-  const list = useStagger(rows.length + 1, { stagger: 0.06, delay: 0.5 }, [tab, asc]);
+  const list = useStagger(rows.length + 1, { stagger: 0.05, delay: 0.4 }, [tab, asc, week, rows.length]);
   const podiumW = width - 40;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <HeroGlow height={600} intensity={1.1} />
       <Rays />
-      <TopBar title="Leaderboard" y={y} />
+      <TopBar title="Leaderboard" y={y} right={<View style={{ width: 48 }} />} />
       <Animated.ScrollView onScroll={onScroll} scrollEventThrottle={16} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: top + 20, paddingBottom: 40 }}>
         <Stars />
-        {/* Podium: head stacked on its block, columns bottom-aligned */}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 20 }}>
-          <View style={{ alignItems: 'center' }}>
-            <PodiumHead p={heads[0]!} u={data[1]!} size={88} rank={2} />
-            <Block p={blocks[1]!} w={podiumW * 0.32} h={110} n="2" />
+        {!id && challenges.data ? (
+          <ArtEmpty art="no-challenge" title="No leaderboard yet" body="Leaderboards rank members in a challenge. Join one from Challenges to get ranked." />
+        ) : q.error ? (
+          <ErrorState error={q.error} onRetry={() => q.refetch()} />
+        ) : !q.data ? (
+          <Skeleton height={260} style={{ marginHorizontal: 20, width: width - 40 }} />
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: 20 }}>
+            <View style={{ alignItems: 'center' }}>
+              {!!data[1] && <PodiumHead p={heads[0]!} u={data[1]} size={84} rank={2} />}
+              <Block p={blocks[1]!} w={podiumW * 0.32} h={110} n="2" />
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              {!!data[0] && <PodiumHead p={heads[1]!} u={data[0]} size={110} rank={1} />}
+              <Block p={blocks[0]!} w={podiumW * 0.36} h={150} n="1" />
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              {!!data[2] && <PodiumHead p={heads[2]!} u={data[2]} size={80} rank={3} />}
+              <Block p={blocks[2]!} w={podiumW * 0.32} h={86} n="3" />
+            </View>
           </View>
-          <View style={{ alignItems: 'center' }}>
-            <PodiumHead p={heads[1]!} u={data[0]!} size={118} rank={1} />
-            <Block p={blocks[0]!} w={podiumW * 0.36} h={150} n="1" />
-          </View>
-          <View style={{ alignItems: 'center' }}>
-            <PodiumHead p={heads[2]!} u={data[2]!} size={84} rank={3} />
-            <Block p={blocks[2]!} w={podiumW * 0.32} h={86} n="3" />
-          </View>
-        </View>
+        )}
 
         {/* Sheet */}
         <View style={{ backgroundColor: colors.card, borderTopLeftRadius: 36, borderTopRightRadius: 36, marginTop: -8, paddingTop: 22, minHeight: 600 }}>
@@ -68,14 +86,21 @@ export default function Leaderboard() {
               value={tab}
               onChange={setTab}
               options={[
-                { id: 'workout', label: 'Workout', icon: Dumbbell },
-                { id: 'cooking', label: 'Cooking', icon: ChefHat },
+                { id: 'overall', label: 'Overall', icon: Trophy },
+                { id: 'weekly', label: 'Weekly', icon: CalendarCheck },
               ]}
             />
           </View>
+          {tab === 'weekly' && (q.data?.weeks.length ?? 0) > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20, marginTop: 14 }}>
+              {q.data!.weeks.map((w) => (
+                <Chip key={w.weekNumber} label={w.isCurrentWeek ? 'This week' : `Week ${w.weekNumber}`} active={(week ?? q.data!.selectedWeek) === w.weekNumber} onPress={() => setWeek(w.weekNumber)} />
+              ))}
+            </ScrollView>
+          )}
           <SectionHeader
             overline
-            title="All Users"
+            title={title ? title.toUpperCase() : 'All members'}
             style={{ marginTop: 26 }}
             action={
               <Pressable onPress={() => setAsc(!asc)} hitSlop={10} accessibilityLabel="Reverse order">
@@ -84,23 +109,29 @@ export default function Leaderboard() {
             }
           />
           <View style={{ paddingHorizontal: 20, gap: 12, marginTop: 16 }}>
+            {!!(q.data && rows.length === 0) && (
+              <Txt color={colors.textMuted}>No check-ins yet{tab === 'weekly' ? ' this week' : ''}. Post today to take the lead.</Txt>
+            )}
             {rows.map((u, k) => {
-              const rank = data.indexOf(u) + 1;
+              const isMe = u.userId === me.data?.user.id;
               return (
-                <Reveal key={u.name + tab} p={list[k]!} y={30}>
-                  <Animated.View layout={LinearTransition.springify()} style={{ flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: colors.secondary, borderRadius: radius.xl, padding: 16 }}>
-                    <Avatar source={u.avatar} size={60} badge={<RankBadge n={rank} />} />
+                <Reveal key={u.userId + tab + (week ?? '')} p={list[k] ?? list[0]!} y={30}>
+                  <Animated.View layout={LinearTransition.duration(220)} style={{ flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: colors.secondary, borderRadius: radius.xl, padding: 16, borderWidth: isMe ? 1.5 : 0, borderColor: colors.primary }}>
+                    <Avatar source={u.imageUrl} name={fullName(u)} size={56} badge={<RankBadge n={u.rank} />} />
                     <View style={{ flex: 1 }}>
-                      <Txt v="bodyLg">{u.name}</Txt>
+                      <Txt v="bodyLg" numberOfLines={1}>
+                        {fullName(u)}
+                        {isMe ? ' (You)' : ''}
+                      </Txt>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                        {tab === 'workout' ? <Dumbbell size={16} color={colors.primaryGlow} /> : <ChefHat size={16} color={colors.primaryGlow} />}
+                        <CalendarCheck size={15} color={colors.primaryGlow} />
                         <Txt v="small" color={colors.textMuted}>
-                          {tab === 'workout' ? 'Workout' : 'Cooking'} streak
+                          {u.totalPosts} check-ins · {u.consistency}%
                         </Txt>
                       </View>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Txt v="stat">{u.value}</Txt>
+                      <Txt v="stat">{u.score}</Txt>
                       <Txt v="caption" color={colors.textMuted}>
                         {unit}
                       </Txt>
@@ -109,29 +140,31 @@ export default function Leaderboard() {
                 </Reveal>
               );
             })}
-            <Reveal p={list[rows.length]!} y={30}>
-              <View style={[{ borderRadius: radius.xl, overflow: 'hidden' }, shadow.glow]}>
-                <LimeGradient style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16 }}>
-                  <Avatar source={avatars.emma} size={60} ring={false} badge={<RankBadge n={32} light />} />
-                  <View style={{ flex: 1 }}>
-                    <Txt v="bodyLg" color={colors.onPrimary} numberOfLines={1}>
-                      (You) {st.name} Richardson
-                    </Txt>
-                    <Txt v="small" color="rgba(10,15,7,0.7)">
-                      {tab === 'workout' ? 'Workout' : 'Cooking'} streak
-                    </Txt>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Txt v="stat" color={colors.onPrimary}>
-                      {tab === 'workout' ? '987k' : '214'}
-                    </Txt>
-                    <Txt v="caption" color="rgba(10,15,7,0.7)">
-                      {unit}
-                    </Txt>
-                  </View>
-                </LimeGradient>
-              </View>
-            </Reveal>
+            {!!mine && (
+              <Reveal p={list[rows.length] ?? list[0]!} y={30}>
+                <View style={[{ borderRadius: radius.xl, overflow: 'hidden' }, shadow.glow]}>
+                  <LimeGradient style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16 }}>
+                    <Avatar source={me.data?.user.imageUrl} name={fullName(me.data?.user)} size={56} ring={false} badge={<RankBadge n={mine.rank} light />} />
+                    <View style={{ flex: 1 }}>
+                      <Txt v="bodyLg" color={colors.onPrimary} numberOfLines={1}>
+                        (You) {fullName(me.data?.user)}
+                      </Txt>
+                      <Txt v="small" color="rgba(10,15,7,0.7)">
+                        #{mine.rank} of {data.length} · {mine.consistency}% consistency
+                      </Txt>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Txt v="stat" color={colors.onPrimary}>
+                        {mine.score}
+                      </Txt>
+                      <Txt v="caption" color="rgba(10,15,7,0.7)">
+                        {unit}
+                      </Txt>
+                    </View>
+                  </LimeGradient>
+                </View>
+              </Reveal>
+            )}
           </View>
         </View>
       </Animated.ScrollView>
@@ -139,21 +172,22 @@ export default function Leaderboard() {
   );
 }
 
-function PodiumHead({ p, u, size, rank }: { p: SharedValue<number>; u: { name: string; avatar: number }; size: number; rank: number }) {
+function PodiumHead({ p, u, size, rank }: { p: SharedValue<number>; u: LeaderEntry; size: number; rank: number }) {
   const a = useAnimatedStyle(() => ({ opacity: p.value, transform: [{ scale: 0.4 + p.value * 0.6 }, { translateY: (1 - p.value) * 30 }] }));
-  const [first, ...rest] = u.name.split(' ');
+  const name = fullName(u);
+  const [first, ...rest] = name.split(' ');
   return (
     <Animated.View style={[{ alignItems: 'center', marginBottom: 10 }, a]}>
       <View>
         <View style={{ borderRadius: size, borderWidth: 4, borderColor: colors.primaryGlow, padding: 2 }}>
-          <Avatar source={u.avatar} size={size} ring={false} />
+          <Avatar source={u.imageUrl} name={name} size={size} ring={false} />
         </View>
         <View style={{ position: 'absolute', right: -2, top: 0, width: rank === 1 ? 38 : 32, height: rank === 1 ? 38 : 32, borderRadius: 20, backgroundColor: rank === 1 ? colors.primary : colors.cream, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: colors.heroMid }}>
           {rank === 1 ? <Crown size={18} color={colors.onPrimary} /> : <Medal size={16} color={rank === 2 ? '#7C8077' : '#B4632D'} />}
         </View>
       </View>
       <Txt v={rank === 1 ? 'h3' : 'bodyLg'} style={{ textAlign: 'center', marginTop: 8 }}>
-        {rank === 1 ? u.name : `${first}\n${rest.join(' ')}`}
+        {rank === 1 ? name : `${first}\n${rest.join(' ')}`}
       </Txt>
     </Animated.View>
   );

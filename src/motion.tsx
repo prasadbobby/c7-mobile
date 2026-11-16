@@ -11,7 +11,7 @@
  */
 import { gsap } from 'gsap';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useWindowDimensions, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, useWindowDimensions, View, type LayoutChangeEvent, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -27,8 +27,9 @@ export { gsap };
 export const ease = {
   out: 'power3.out',
   inOut: 'power2.inOut',
-  pop: 'back.out(1.8)',
-  spring: 'elastic.out(1, 0.55)',
+  // No overshoot/bounce anywhere: every named ease is a calm deceleration.
+  pop: 'power3.out',
+  spring: 'power3.out',
   expo: 'expo.out',
 } as const;
 
@@ -50,6 +51,8 @@ export function svTo(sv: SharedValue<number>, to: number, vars: gsap.TweenVars =
 
 /** Stagger a list of shared values 0 → 1 (one GSAP tween, many targets). */
 export function svStagger(values: SharedValue<number>[], vars: gsap.TweenVars = {}) {
+  // Empty lists (no rows yet) would make GSAP warn "target not found"; nothing to animate.
+  if (!values.length) return gsap.timeline();
   const proxies = values.map((v) => ({ v: v.value }));
   return gsap.to(proxies, {
     v: 1,
@@ -159,7 +162,13 @@ export function Parallax({ y, height, children, style }: { y: SharedValue<number
     ],
     opacity: interpolate(y.value, [0, height * 0.9], [1, 0.25], Extrapolation.CLAMP),
   }));
-  return <Animated.View style={[{ height, overflow: 'hidden' }, style, a]}>{children}</Animated.View>;
+  // The clip box stays put; only the image inside moves. Otherwise the translated image slides out of
+  // the hero and shows un-faded below it (the gradient overlay doesn't move with it).
+  return (
+    <View style={[{ height, overflow: 'hidden' }, style]}>
+      <Animated.View style={[StyleSheet.absoluteFill, a]}>{children}</Animated.View>
+    </View>
+  );
 }
 
 /**
